@@ -1,0 +1,832 @@
+import { Canvas, useFrame } from '@react-three/fiber';
+import { ContactShadows, Environment, Float, OrbitControls, Sparkles } from '@react-three/drei';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import type { Group } from 'three';
+
+const appCatalog = [
+  { id: 'calculator', label: 'Calculator', icon: '∑', accent: '#7dd3fc' },
+  { id: 'notes', label: 'Notes', icon: '✎', accent: '#c4b5fd' },
+  { id: 'clock', label: 'Clock', icon: '◔', accent: '#bfdbfe' },
+  { id: 'music', label: 'Music', icon: '♫', accent: '#a7f3d0' },
+  { id: 'gallery', label: 'Gallery', icon: '▣', accent: '#f9a8d4' },
+  { id: 'system', label: 'System', icon: '◎', accent: '#fde68a' },
+] as const;
+
+type AppId = (typeof appCatalog)[number]['id'];
+type PaletteName = 'cyan' | 'violet' | 'silver' | 'neutral';
+type WallpaperName = 'midnight' | 'aurora' | 'silver' | 'violet';
+
+type MaterialSettings = {
+  transparency: number;
+  refraction: number;
+  thickness: number;
+  edge: number;
+  blur: number;
+  chrome: number;
+  ambient: number;
+};
+
+type ThemeSettings = MaterialSettings & {
+  palette: PaletteName;
+  wallpaper: WallpaperName;
+  brightness: number;
+  sound: boolean;
+  animations: boolean;
+  reducedMotion: boolean;
+  quality: 'balanced' | 'ultra';
+};
+
+type Notification = {
+  id: number;
+  title: string;
+  detail: string;
+  time: string;
+};
+
+const palettes = {
+  cyan: { accent: '#7dd3fc', secondary: '#a5f3fc', glow: '#67e8f9', chrome: '#e2e8f0' },
+  violet: { accent: '#c4b5fd', secondary: '#ddd6fe', glow: '#a78bfa', chrome: '#f5f3ff' },
+  silver: { accent: '#dbeafe', secondary: '#e2e8f0', glow: '#cbd5e1', chrome: '#f8fafc' },
+  neutral: { accent: '#e2e8f0', secondary: '#f8fafc', glow: '#cbd5e1', chrome: '#f8fafc' },
+} as const;
+
+const defaultMaterial: MaterialSettings = {
+  transparency: 0.72,
+  refraction: 0.72,
+  thickness: 1.4,
+  edge: 1.2,
+  blur: 0.56,
+  chrome: 0.8,
+  ambient: 1.3,
+};
+
+const defaultSettings: ThemeSettings = {
+  ...defaultMaterial,
+  palette: 'cyan',
+  wallpaper: 'midnight',
+  brightness: 80,
+  sound: true,
+  animations: true,
+  reducedMotion: false,
+  quality: 'balanced',
+};
+
+const galleryItems = [
+  { id: 1, title: 'Violet Drift', palette: 'linear-gradient(135deg, #1d4ed8 0%, #8b5cf6 40%, #f0abfc 100%)' },
+  { id: 2, title: 'Ice Bloom', palette: 'linear-gradient(135deg, #0f172a 0%, #2563eb 35%, #a5f3fc 100%)' },
+  { id: 3, title: 'Chrome Haze', palette: 'linear-gradient(135deg, #111827 0%, #64748b 30%, #e2e8f0 100%)' },
+  { id: 4, title: 'Lumen Echo', palette: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 35%, #f0abfc 100%)' },
+  { id: 5, title: 'Prism Field', palette: 'linear-gradient(135deg, #082f49 0%, #0ea5e9 30%, #e0f2fe 100%)' },
+  { id: 6, title: 'Glass Wake', palette: 'linear-gradient(135deg, #111827 0%, #334155 35%, #cbd5e1 100%)' },
+] as const;
+
+const demoTracks = [
+  { title: 'Glass Current', artist: 'Lumen' },
+  { title: 'Polar Drift', artist: 'North Arc' },
+  { title: 'Soft Signal', artist: 'Midnight Echo' },
+] as const;
+
+const initialNotifications: Notification[] = [
+  { id: 1, title: 'System check', detail: 'Transmission stabilised at 96%.', time: 'just now' },
+  { id: 2, title: 'Cloud sync', detail: 'Notes and preferences stored locally.', time: '4m ago' },
+  { id: 3, title: 'Battery', detail: 'Power reserve at 86%.', time: '11m ago' },
+];
+
+function formatTime(date: Date) {
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+}
+
+function getWallpaperTexture(name: WallpaperName) {
+  const map: Record<WallpaperName, string> = {
+    midnight: 'radial-gradient(circle at top, rgba(59,130,246,0.18), rgba(2,6,23,1) 68%)',
+    aurora: 'radial-gradient(circle at top left, rgba(45,212,191,0.32), rgba(15,23,42,1) 55%)',
+    silver: 'radial-gradient(circle at top, rgba(148,163,184,0.24), rgba(17,24,39,1) 62%)',
+    violet: 'radial-gradient(circle at top, rgba(168,85,247,0.28), rgba(15,23,42,1) 62%)',
+  };
+  return map[name];
+}
+
+function OrbitingCore({ settings }: { settings: ThemeSettings }) {
+  const groupRef = useRef<Group | null>(null);
+  const accent = palettes[settings.palette].accent;
+
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime();
+    if (groupRef.current) {
+      groupRef.current.rotation.x = t * 0.35;
+      groupRef.current.rotation.y = t * 0.5;
+      groupRef.current.position.y = Math.sin(t * 0.8) * 0.08;
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      <Float speed={1.4} rotationIntensity={1} floatIntensity={0.55}>
+        <mesh scale={1.8}>
+          <icosahedronGeometry args={[1.38, 2]} />
+          <meshPhysicalMaterial
+            color={palettes[settings.palette].secondary}
+            roughness={0.12}
+            metalness={0.18}
+            transmission={Math.max(0.8, settings.transparency)}
+            thickness={settings.thickness}
+            ior={1.52 + settings.refraction}
+            envMapIntensity={settings.chrome}
+            reflectivity={0.9}
+            clearcoat={1}
+            clearcoatRoughness={0.18}
+            iridescence={0.8}
+            iridescenceIOR={1.45}
+            attenuationDistance={1.2}
+            attenuationColor={accent}
+          />
+        </mesh>
+      </Float>
+      <mesh scale={1.18}>
+        <octahedronGeometry args={[1.3, 1]} />
+        <meshPhysicalMaterial
+          color={palettes[settings.palette].chrome}
+          emissive={accent}
+          emissiveIntensity={0.5}
+          transparent
+          opacity={0.28}
+          roughness={0.06}
+          metalness={0.92}
+          transmission={0.9}
+          ior={1.44}
+          thickness={0.8}
+        />
+      </mesh>
+      <Sparkles count={settings.quality === 'ultra' ? 120 : 70} scale={6} size={settings.blur + 0.32} speed={0.3} color={accent} />
+    </group>
+  );
+}
+
+function LumenScene({ settings }: { settings: ThemeSettings }) {
+  const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, settings.quality === 'ultra' ? 2 : 1.5) : 1;
+
+  return (
+    <Canvas camera={{ position: [0, 0, 6.4], fov: 42 }} dpr={dpr}>
+      <color attach="background" args={['#040814']} />
+      <ambientLight intensity={0.9 * settings.ambient} />
+      <directionalLight position={[2, 5, 4]} intensity={1.8} color={palettes[settings.palette].secondary} />
+      <pointLight position={[-3, 0, 4]} intensity={4.5} color={palettes[settings.palette].accent} />
+      <pointLight position={[4, -2, 3]} intensity={2.4} color="#c4b5fd" />
+      <OrbitControls enablePan={false} enableZoom={false} autoRotate autoRotateSpeed={0.7} />
+      <group position={[0, 0.2, 0]}>
+        <OrbitingCore settings={settings} />
+      </group>
+      <ContactShadows position={[0, -2.4, 0]} blur={2.5} opacity={0.5} scale={8} far={8} />
+      <Environment preset="studio" />
+    </Canvas>
+  );
+}
+
+function GlassPanel({ children, className = '', style }: { children: ReactNode; className?: string; style?: CSSProperties }) {
+  return (
+    <div className={`glass-panel ${className}`.trim()} style={style}>
+      {children}
+    </div>
+  );
+}
+
+function AppLauncher({ open, onClose, onLaunch }: { open: boolean; onClose: () => void; onLaunch: (id: AppId) => void; }) {
+  if (!open) return null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="overlay-panel panel-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="eyebrow">App launcher</span>
+          <button className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+        <div className="launcher-search">
+          <span>⌕</span>
+          <input type="text" placeholder="Search apps" />
+        </div>
+        <div className="app-grid">
+          {appCatalog.map((app) => (
+            <button
+              key={app.id}
+              className="app-tile"
+              style={{ ['--app-accent' as any]: app.accent }}
+              onClick={() => {
+                onLaunch(app.id);
+                onClose();
+              }}
+            >
+              <span className="app-icon">{app.icon}</span>
+              <span>{app.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ControlCenter({
+  open,
+  onClose,
+  settings,
+  setSettings,
+}: {
+  open: boolean;
+  onClose: () => void;
+  settings: ThemeSettings;
+  setSettings: React.Dispatch<React.SetStateAction<ThemeSettings>>;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="overlay-panel panel-md" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="eyebrow">Control center</span>
+          <button className="ghost-button" onClick={onClose}>Done</button>
+        </div>
+        <div className="control-stack">
+          <div className="control-block">
+            <label>Brightness</label>
+            <input
+              type="range"
+              min={40}
+              max={100}
+              value={settings.brightness}
+              onChange={(e) => setSettings((prev) => ({ ...prev, brightness: Number(e.target.value) }))}
+            />
+          </div>
+          <div className="toggle-row">
+            <span>Sound</span>
+            <button className={`toggle ${settings.sound ? 'on' : ''}`} onClick={() => setSettings((prev) => ({ ...prev, sound: !prev.sound }))}>
+              {settings.sound ? 'On' : 'Off'}
+            </button>
+          </div>
+          <div className="toggle-row">
+            <span>Animations</span>
+            <button className={`toggle ${settings.animations ? 'on' : ''}`} onClick={() => setSettings((prev) => ({ ...prev, animations: !prev.animations }))}>
+              {settings.animations ? 'On' : 'Off'}
+            </button>
+          </div>
+          <div className="toggle-row">
+            <span>Reduced motion</span>
+            <button className={`toggle ${settings.reducedMotion ? 'on' : ''}`} onClick={() => setSettings((prev) => ({ ...prev, reducedMotion: !prev.reducedMotion }))}>
+              {settings.reducedMotion ? 'On' : 'Off'}
+            </button>
+          </div>
+          <div className="theme-grid">
+            {(['midnight', 'aurora', 'silver', 'violet'] as WallpaperName[]).map((wallpaper) => (
+              <button
+                key={wallpaper}
+                className={`theme-swatch ${settings.wallpaper === wallpaper ? 'selected' : ''}`}
+                onClick={() => setSettings((prev) => ({ ...prev, wallpaper }))}
+                style={{ background: getWallpaperTexture(wallpaper) }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({
+  open,
+  onClose,
+  settings,
+  setSettings,
+}: {
+  open: boolean;
+  onClose: () => void;
+  settings: ThemeSettings;
+  setSettings: React.Dispatch<React.SetStateAction<ThemeSettings>>;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="overlay-panel panel-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="eyebrow">Material laboratory</span>
+          <button className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+
+        <div className="settings-grid">
+          <div className="control-block">
+            <label>Glass transparency</label>
+            <input type="range" min={0.2} max={1} step={0.01} value={settings.transparency} onChange={(e) => setSettings((prev) => ({ ...prev, transparency: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Refraction intensity</label>
+            <input type="range" min={0.2} max={1.2} step={0.01} value={settings.refraction} onChange={(e) => setSettings((prev) => ({ ...prev, refraction: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Glass thickness</label>
+            <input type="range" min={0.6} max={2.2} step={0.05} value={settings.thickness} onChange={(e) => setSettings((prev) => ({ ...prev, thickness: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Edge brightness</label>
+            <input type="range" min={0.4} max={2} step={0.05} value={settings.edge} onChange={(e) => setSettings((prev) => ({ ...prev, edge: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Blur intensity</label>
+            <input type="range" min={0.2} max={1.4} step={0.05} value={settings.blur} onChange={(e) => setSettings((prev) => ({ ...prev, blur: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Chrome reflections</label>
+            <input type="range" min={0.2} max={1.6} step={0.05} value={settings.chrome} onChange={(e) => setSettings((prev) => ({ ...prev, chrome: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Ambient lighting</label>
+            <input type="range" min={0.5} max={2.2} step={0.05} value={settings.ambient} onChange={(e) => setSettings((prev) => ({ ...prev, ambient: Number(e.target.value) }))} />
+          </div>
+          <div className="control-block">
+            <label>Graphics quality</label>
+            <select value={settings.quality} onChange={(e) => setSettings((prev) => ({ ...prev, quality: e.target.value as 'balanced' | 'ultra' }))}>
+              <option value="balanced">Balanced</option>
+              <option value="ultra">Ultra</option>
+            </select>
+          </div>
+
+          <div className="theme-section">
+            <label>Theme</label>
+            <div className="theme-grid">
+              {(['cyan', 'violet', 'silver', 'neutral'] as PaletteName[]).map((palette) => (
+                <button
+                  key={palette}
+                  className={`theme-swatch ${settings.palette === palette ? 'selected' : ''}`}
+                  style={{ background: `linear-gradient(135deg, ${palettes[palette].accent}, ${palettes[palette].secondary})` }}
+                  onClick={() => setSettings((prev) => ({ ...prev, palette }))}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPanel({
+  open,
+  onClose,
+  items,
+  onClearAll,
+  onDismiss,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: Notification[];
+  onClearAll: () => void;
+  onDismiss: (id: number) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="overlay-panel panel-md" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="eyebrow">Notifications ({items.length})</span>
+          <button className="ghost-button" onClick={onClearAll}>Clear all</button>
+        </div>
+        <div className="notification-list">
+          {items.length === 0 ? <div className="empty-state">All clear.</div> : items.map((item) => (
+            <div className="notification-item" key={item.id}>
+              <div className="dot" />
+              <div className="notification-body">
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+              </div>
+              <div className="notification-meta">
+                <small>{item.time}</small>
+                <button onClick={() => onDismiss(item.id)}>Dismiss</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MultitaskingPanel({
+  open,
+  onClose,
+  active,
+  apps,
+  onSwitch,
+  onCloseApp,
+}: {
+  open: boolean;
+  onClose: () => void;
+  active: AppId | null;
+  apps: AppId[];
+  onSwitch: (id: AppId) => void;
+  onCloseApp: (id: AppId) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="overlay-panel panel-md" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <span className="eyebrow">Multitasking</span>
+          <button className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+        <div className="stack-list">
+          {apps.length === 0 ? <div className="empty-state">No apps open.</div> : apps.map((id) => (
+            <div className={`stack-item ${active === id ? 'active' : ''}`} key={id}>
+              <span>{appCatalog.find((item) => item.id === id)?.label ?? id}</span>
+              <div className="stack-actions">
+                <button onClick={() => onSwitch(id)}>Focus</button>
+                <button onClick={() => onCloseApp(id)}>Close</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotesApp({ text, setText }: { text: string; setText: (value: string) => void }) {
+  return (
+    <div className="app-window-content">
+      <div className="app-header-row">
+        <div>Notes</div>
+        <span className="badge">Local</span>
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} className="notes-textarea" />
+    </div>
+  );
+}
+
+function CalculatorApp({ value, setValue }: { value: string; setValue: (next: string) => void; }) {
+  const handleButton = (token: string) => {
+    if (token === 'C') {
+      setValue('');
+      return;
+    }
+    if (token === '⌫') {
+      setValue(value.slice(0, -1));
+      return;
+    }
+    if (token === '=') {
+      try {
+        const safe = value.replace(/×/g, '*').replace(/÷/g, '/');
+        const result = Function(`"use strict"; return (${safe})`)();
+        setValue(String(result));
+      } catch {
+        setValue('Error');
+      }
+      return;
+    }
+    setValue(value + token);
+  };
+
+  return (
+    <div className="app-window-content">
+      <div className="calc-screen">{value || '0'}</div>
+      <div className="calc-grid">
+        {['C', '⌫', '÷', '×', '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '=', '0', '.'].map((button) => (
+          <button key={button} className="calc-key" onClick={() => handleButton(button)}>{button}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClockApp() {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <div className="app-window-content centered-stack">
+      <div className="time-large">{formatTime(now)}</div>
+      <div className="date-line">{formatDate(now)}</div>
+      <div className="analog-wrap">
+        <div className="analog-clock">
+          <span className="hand hour" style={{ transform: `translate(-50%, -100%) rotate(${(now.getHours() % 12) * 30 + now.getMinutes() / 2}deg)` }} />
+          <span className="hand minute" style={{ transform: `translate(-50%, -100%) rotate(${now.getMinutes() * 6 + now.getSeconds() / 10}deg)` }} />
+          <span className="hand second" style={{ transform: `translate(-50%, -100%) rotate(${now.getSeconds() * 6}deg)` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MusicApp({
+  currentTrack,
+  setCurrentTrack,
+  isPlaying,
+  setIsPlaying,
+  progress,
+  setProgress,
+}: {
+  currentTrack: number;
+  setCurrentTrack: (index: number) => void;
+  isPlaying: boolean;
+  setIsPlaying: (value: boolean) => void;
+  progress: number;
+  setProgress: (value: number) => void;
+}) {
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = window.setInterval(() => {
+      setProgress((prev) => (prev >= 100 ? 0 : prev + 1));
+    }, 900);
+    return () => window.clearInterval(id);
+  }, [isPlaying, setProgress]);
+
+  return (
+    <div className="app-window-content">
+      <div className="music-card">
+        <div className="album-art" />
+        <div>
+          <strong>{demoTracks[currentTrack].title}</strong>
+          <small>{demoTracks[currentTrack].artist}</small>
+        </div>
+      </div>
+      <div className="progress-bar">
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <div className="music-controls">
+        <button onClick={() => setCurrentTrack((currentTrack - 1 + demoTracks.length) % demoTracks.length)}>Prev</button>
+        <button className="primary" onClick={() => setIsPlaying(!isPlaying)}>{isPlaying ? 'Pause' : 'Play'}</button>
+        <button onClick={() => setCurrentTrack((currentTrack + 1) % demoTracks.length)}>Next</button>
+      </div>
+    </div>
+  );
+}
+
+function GalleryApp({ selected, setSelected }: { selected: number; setSelected: (id: number) => void; }) {
+  return (
+    <div className="app-window-content gallery-grid">
+      {galleryItems.map((item) => (
+        <button key={item.id} className={`gallery-tile ${selected === item.id ? 'active' : ''}`} style={{ background: item.palette }} onClick={() => setSelected(item.id)}>
+          <span>{item.title}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SystemInfoApp() {
+  const stats = {
+    os: 'Wonder OS',
+    build: 'Lumen 1.0',
+    gpu: 'WebGL Renderer',
+    memory: '8.2 GB',
+    stability: '96%',
+  };
+
+  return (
+    <div className="app-window-content">
+      <div className="system-info-grid">
+        <div><label>OS</label><strong>{stats.os}</strong></div>
+        <div><label>Build</label><strong>{stats.build}</strong></div>
+        <div><label>GPU</label><strong>{stats.gpu}</strong></div>
+        <div><label>Memory</label><strong>{stats.memory}</strong></div>
+        <div><label>Stability</label><strong>{stats.stability}</strong></div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [settings, setSettings] = useState<ThemeSettings>(defaultSettings);
+  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [notes, setNotes] = useState('');
+  const [appLauncherOpen, setAppLauncherOpen] = useState(false);
+  const [controlCenterOpen, setControlCenterOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [multitaskingOpen, setMultitaskingOpen] = useState(false);
+  const [openApps, setOpenApps] = useState<AppId[]>(['notes', 'clock']);
+  const [activeApp, setActiveApp] = useState<AppId | null>('notes');
+  const [calculatorValue, setCalculatorValue] = useState('');
+  const [musicIndex, setMusicIndex] = useState(0);
+  const [musicProgress, setMusicProgress] = useState(42);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [gallerySelected, setGallerySelected] = useState(1);
+
+  useEffect(() => {
+    const savedNotes = window.localStorage.getItem('wonder-os-notes');
+    if (savedNotes) setNotes(savedNotes);
+
+    const savedSettings = window.localStorage.getItem('wonder-os-settings');
+    if (savedSettings) {
+      const parsed = JSON.parse(savedSettings) as Partial<ThemeSettings>;
+      setSettings((prev) => ({ ...prev, ...parsed }));
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('wonder-os-notes', notes);
+  }, [notes]);
+
+  useEffect(() => {
+    window.localStorage.setItem('wonder-os-settings', JSON.stringify(settings));
+  }, [settings]);
+
+  useEffect(() => {
+    document.body.style.setProperty('--brightness', (settings.brightness / 100).toString());
+    document.body.style.setProperty('--panel-glow', palettes[settings.palette].accent);
+    document.body.style.setProperty('--wallpaper', getWallpaperTexture(settings.wallpaper));
+    document.body.style.setProperty('--motion-reduce', settings.reducedMotion ? '0.4s' : '0.7s');
+  }, [settings]);
+
+  const cssVars = useMemo(() => {
+    const palette = palettes[settings.palette];
+    return {
+      '--glass-alpha': settings.transparency.toFixed(2),
+      '--glass-ior': (1.4 + settings.refraction).toFixed(2),
+      '--glass-thickness': settings.thickness.toFixed(2),
+      '--glass-edge': settings.edge.toFixed(2),
+      '--glass-blur': settings.blur.toFixed(2),
+      '--glass-chrome': settings.chrome.toFixed(2),
+      '--accent': palette.accent,
+      '--accent-2': palette.secondary,
+      '--chrome': palette.chrome,
+      '--wallpaper': getWallpaperTexture(settings.wallpaper),
+    } as CSSProperties;
+  }, [settings]);
+
+  const openApp = (id: AppId) => {
+    setOpenApps((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setActiveApp(id);
+  };
+
+  const closeApp = (id: AppId) => {
+    const next = openApps.filter((app) => app !== id);
+    setOpenApps(next);
+    if (activeApp === id) setActiveApp(next[0] ?? null);
+  };
+
+  const dismissNotification = (id: number) => setNotifications((prev) => prev.filter((n) => n.id !== id));
+  const clearNotifications = () => setNotifications([]);
+
+  const renderApp = () => {
+    switch (activeApp) {
+      case 'calculator':
+        return <CalculatorApp value={calculatorValue} setValue={setCalculatorValue} />;
+      case 'notes':
+        return <NotesApp text={notes} setText={setNotes} />;
+      case 'clock':
+        return <ClockApp />;
+      case 'music':
+        return <MusicApp currentTrack={musicIndex} setCurrentTrack={setMusicIndex} isPlaying={isPlaying} setIsPlaying={setIsPlaying} progress={musicProgress} setProgress={setMusicProgress} />;
+      case 'gallery':
+        return <GalleryApp selected={gallerySelected} setSelected={setGallerySelected} />;
+      case 'system':
+        return <SystemInfoApp />;
+      default:
+        return null;
+    }
+  };
+
+  const now = new Date();
+
+  return (
+    <div className="os-shell" style={cssVars}>
+      <div className="ambient-backdrop" />
+
+      <header className="topbar glass-panel">
+        <div className="status-left">
+          <span className="brand">WONDER OS</span>
+          <span className="edition">Lumen 1.0</span>
+        </div>
+        <div className="status-right">
+          <span>{formatTime(now)}</span>
+          <span className="status-pill">Signal 5G</span>
+          <span className="status-pill">Synced</span>
+        </div>
+      </header>
+
+      <main className="home-layout">
+        <section className="hero-panel glass-panel">
+          <div className="hero-scene">
+            <div className="scene-meta">
+              <span className="eyebrow">Home</span>
+              <h1>Lumen Core</h1>
+              <p>Immersive glass operating system</p>
+            </div>
+            <div className="scene-container">
+              <LumenScene settings={settings} />
+            </div>
+          </div>
+          <div className="hero-stats">
+            <div className="stat-box">
+              <span>Time</span>
+              <strong>{formatTime(now)}</strong>
+            </div>
+            <div className="stat-box">
+              <span>Date</span>
+              <strong>{formatDate(now)}</strong>
+            </div>
+            <div className="stat-box">
+              <span>Transmission</span>
+              <strong>{settings.transparency.toFixed(2)}</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside className="side-stack">
+          <GlassPanel className="widget">
+            <div className="mini-header">
+              <span>System status</span>
+              <span className="badge alive">Live</span>
+            </div>
+            <ul className="status-list">
+              <li><span>Glass</span><strong>{settings.transparency.toFixed(2)}</strong></li>
+              <li><span>Refraction</span><strong>{settings.refraction.toFixed(2)}</strong></li>
+              <li><span>Brightness</span><strong>{settings.brightness}%</strong></li>
+            </ul>
+          </GlassPanel>
+
+          <GlassPanel className="widget">
+            <div className="mini-header">
+              <span>Quick actions</span>
+            </div>
+            <div className="quick-actions">
+              <button onClick={() => openApp('notes')}>Notes</button>
+              <button onClick={() => openApp('calculator')}>Calc</button>
+              <button onClick={() => setControlCenterOpen(true)}>System</button>
+            </div>
+          </GlassPanel>
+        </aside>
+      </main>
+
+      <nav className="dock glass-panel">
+        <button className="dock-button" onClick={() => setAppLauncherOpen(true)}>⌘</button>
+        {appCatalog.map((app) => (
+          <button
+            key={app.id}
+            className={`dock-button ${activeApp === app.id ? 'active' : ''}`}
+            onClick={() => openApp(app.id)}
+            style={{ ['--dock-accent' as any]: app.accent }}
+          >
+            {app.icon}
+          </button>
+        ))}
+        <button className="dock-button" onClick={() => setNotificationsOpen(true)}>
+          {notifications.length > 0 ? <span className="notification-indicator">{notifications.length}</span> : null}
+          🔔
+        </button>
+      </nav>
+
+      {activeApp ? (
+        <div className="app-window glass-panel">
+          <div className="panel-header window-header">
+            <span className="eyebrow">{appCatalog.find((app) => app.id === activeApp)?.label ?? activeApp}</span>
+            <div className="window-actions">
+              <button className="ghost-button" onClick={() => setMultitaskingOpen(true)}>Stack</button>
+              <button className="ghost-button" onClick={() => closeApp(activeApp)}>Close</button>
+            </div>
+          </div>
+          {renderApp()}
+        </div>
+      ) : null}
+
+      <AppLauncher open={appLauncherOpen} onClose={() => setAppLauncherOpen(false)} onLaunch={openApp} />
+      <ControlCenter open={controlCenterOpen} onClose={() => setControlCenterOpen(false)} settings={settings} setSettings={setSettings} />
+      <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} settings={settings} setSettings={setSettings} />
+      <NotificationsPanel
+        open={notificationsOpen}
+        onClose={() => setNotificationsOpen(false)}
+        items={notifications}
+        onClearAll={clearNotifications}
+        onDismiss={dismissNotification}
+      />
+      <MultitaskingPanel
+        open={multitaskingOpen}
+        onClose={() => setMultitaskingOpen(false)}
+        active={activeApp}
+        apps={openApps}
+        onSwitch={(id) => {
+          setActiveApp(id);
+          setMultitaskingOpen(false);
+        }}
+        onCloseApp={(id) => closeApp(id)}
+      />
+
+      <button className="floating-settings" onClick={() => setSettingsOpen(true)}>Settings</button>
+    </div>
+  );
+}
